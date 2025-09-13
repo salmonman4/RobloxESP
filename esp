@@ -283,13 +283,16 @@ function ESP:Update(dt)
     data.name.TextColor3 = color
     data.name.Visible = true
 
-    -- distance-based Billboard size
+    -- distance-based Billboard size (fix)
     local dist = (cam.CFrame.Position - root.Position).Magnitude
-    local factor = math.clamp(30 / dist, 0.5, 2) -- tweak numbers
+    local factor = math.clamp(dist / 30, 0.8, 2) -- grows gently with distance
     data.bb.Size = UDim2.new(4 * factor, 0, 1.5 * factor, 0)
 else
-    if data.name then data.name.Visible = false end
+    if data.name then
+        data.name.Visible = false
+    end
 end
+
 
 		else
 			for _, line in ipairs(data.skeleton) do line.Visible = false end
