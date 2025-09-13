@@ -38,8 +38,8 @@ local function attachNameTag(self, plr, data)
 	billboard.Name = "Nametag"
 	billboard.Adornee = head
 	billboard.AlwaysOnTop = true
-	billboard.Size = UDim2.new(4, 0, 1.5, 0) -- scale only
-	billboard.StudsOffset = Vector3.new(0, 2, 0) -- lift above head
+	billboard.Size = UDim2.new(4, 13, 1.5, 5)
+	billboard.StudsOffset = Vector3.new(0, 2, 0)
 	billboard.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	billboard.Parent = head
 	-- Username label
@@ -70,7 +70,7 @@ function ESP.new(config)
 	
 	self.enabled = config.enabled or false
 	self.rainbow = config.rainbow or false
-	self.color = config.color or Color3.new(0, 1, 0)
+	self.color = config.color or Color3.new(1, 1, 1)
 	self.defaultColor = self.color
 	self.showSkeleton = config.showSkeleton ~= false
 	self.showBox = config.showBox ~= false
