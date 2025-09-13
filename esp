@@ -38,7 +38,7 @@ local function attachNameTag(self, plr, data)
 	billboard.Name = "Nametag"
 	billboard.Adornee = head
 	billboard.AlwaysOnTop = true
-	billboard.Size = UDim2.new(4, 13, 1.5, 5)
+	billboard.Size = UDim2.new(4, 0, 1.5, 0)
 	billboard.StudsOffset = Vector3.new(0, 2, 0)
 	billboard.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	billboard.Parent = head
@@ -279,12 +279,18 @@ function ESP:Update(dt)
 				end
 			end
 			
-			if self.showName and data.name then
-				data.name.TextColor3 = color
-				data.name.Visible = true
-			else
-				if data.name then data.name.Visible = false end
-			end
+			if self.showName and data.name and data.bb then
+    data.name.TextColor3 = color
+    data.name.Visible = true
+
+    -- distance-based Billboard size
+    local dist = (cam.CFrame.Position - root.Position).Magnitude
+    local factor = math.clamp(30 / dist, 0.5, 2) -- tweak numbers
+    data.bb.Size = UDim2.new(4 * factor, 0, 1.5 * factor, 0)
+else
+    if data.name then data.name.Visible = false end
+end
+
 		else
 			for _, line in ipairs(data.skeleton) do line.Visible = false end
 			for _, l in pairs(data.box) do l.Visible = false end
