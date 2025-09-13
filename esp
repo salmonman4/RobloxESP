@@ -285,7 +285,7 @@ function ESP:Update(dt)
 
     -- distance-based Billboard size (fix)
     local dist = (cam.CFrame.Position - root.Position).Magnitude
-    local factor = math.clamp(dist / 30, 0.8, 2) -- grows gently with distance
+    local factor = math.clamp(dist / 25, 0.8, 2) -- grows gently with distance
     data.bb.Size = UDim2.new(4 * factor, 0, 1.5 * factor, 0)
 else
     if data.name then
