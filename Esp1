@@ -1,400 +1,327 @@
---!strict
--- ESP.lua
--- Feature flags: box, skeleton, names
--- Public API:
---   ESP.init(configTable) -> controller
---   controller:toggle(on?) ; controller:setColor(Color3)
---   controller:setRainbow(on?) ; controller:setFeatures({box=?, skeleton=?, names=?})
---   controller:include(feature) ; controller:exclude(feature)
---   controller:destroy()
+-- ModuleScript (e.g., place in ReplicatedStorage or ServerScriptService, but since Local, probably StarterPlayerScripts as Local Module)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
-type FeatureSet = { box: boolean?, skeleton: boolean?, names: boolean? }
-
-local DEFAULTS = {
-	enabled = false,
-	color = Color3.fromRGB(0, 255, 0),
-	rainbow = false,
-	features = { box = true, skeleton = true, names = true },
-	ignoreLocal = true,
-	rainbowSpeed = 0.15, -- HSV cycles per second
+local Connections = {
+	{"Head", "UpperTorso"},
+	{"UpperTorso", "LowerTorso"},
+	{"UpperTorso", "LeftUpperArm"},
+	{"UpperTorso", "RightUpperArm"},
+	{"LeftUpperArm", "LeftLowerArm"},
+	{"RightUpperArm", "RightLowerArm"},
+	{"LeftLowerArm", "LeftHand"},
+	{"RightLowerArm", "RightHand"},
+	{"LowerTorso", "LeftUpperLeg"},
+	{"LowerTorso", "RightUpperLeg"},
+	{"LeftUpperLeg", "LeftLowerLeg"},
+	{"RightUpperLeg", "RightLowerLeg"},
+	{"LeftLowerLeg", "LeftFoot"},
+	{"RightLowerLeg", "RightFoot"},
 }
 
-local SKELETON_CONNECTIONS = table.freeze({
-	{"Head","UpperTorso"},
-	{"UpperTorso","LowerTorso"},
-	{"UpperTorso","LeftUpperArm"}, {"LeftUpperArm","LeftLowerArm"}, {"LeftLowerArm","LeftHand"},
-	{"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
-	{"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
-	{"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
-})
+local ESP = {}
+ESP.__index = ESP
 
-local function fastPairs(t) -- tiny perf win in tight loops
-	return next, t, nil
-end
-
-local function newLine(thickness:number)
-	local l = Drawing.new("Line")
-	l.Thickness = thickness
-	l.Visible = false
-	return l
-end
-
-local function clearDrawingTable(tbl)
-	for _, v in fastPairs(tbl) do
-		if typeof(v) == "table" then
-			for _, d in fastPairs(v) do if d and d.Remove then d:Remove() end end
-		elseif v and v.Remove then
-			v:Remove()
-		end
-	end
-	table.clear(tbl)
-end
-
-local function mkBillboard(char: Model, username: string): BillboardGui
-	local head = char:FindFirstChild("Head") :: BasePart?
-	if not head then return nil :: any end
-
-	local bb = Instance.new("BillboardGui")
-	bb.Name = "ESP_NameTag"
-	bb.Adornee = head
-	bb.AlwaysOnTop = true
-	bb.LightInfluence = 0
-	-- Size independent of screen. Fixed offset in studs for consistent look.
-	bb.Size = UDim2.fromOffset(0, 0)
-	bb.StudsOffsetWorldSpace = Vector3.new(0, 2.6, 0)
-
-	local tl = Instance.new("TextLabel")
-	tl.Name = "Label"
-	tl.BackgroundTransparency = 1
-	tl.Text = username
-	tl.TextSize = 14
-	-- Rubik fontface
-	local ff = FontFace.new("rbxassetid://12187365977") -- Rubik
-	tl.FontFace = ff
-	tl.AnchorPoint = Vector2.new(0.5, 0.5)
-	tl.Position = UDim2.fromScale(0.5, 0.5)
-	tl.Size = UDim2.fromOffset(200, 28)
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 3
-	stroke.Color = Color3.new(0,0,0)
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Parent = tl
-
-	tl.Parent = bb
-	return bb
-end
-
-local Controller = {}
-Controller.__index = Controller
-
-function Controller:_attachCharacter(plr: Player, char: Model)
-	-- per-player cache
-	local p = {
-		lines = {}, -- skeleton lines [i] = Line
-		box = nil,  -- {Top,Bottom,Left,Right}
-		nameBillboard = nil :: BillboardGui?,
-		connections = {},
-		char = char,
-	}
-	self._perPlayer[plr] = p
-
-	-- Pre-build skeleton line objects once
-	for i = 1, #SKELETON_CONNECTIONS do
-		p.lines[i] = newLine(2)
-	end
-
-	-- Pre-build box lines once
-	p.box = {
-		Top = newLine(2),
-		Bottom = newLine(2),
-		Left = newLine(2),
-		Right = newLine(2),
-	}
-
-	-- Build name billboard once
-	if self.features.names then
-		local bb = mkBillboard(char, plr.DisplayName or plr.Name)
-		if bb then
-			bb.Parent = char
-			p.nameBillboard = bb
-		end
-	end
-
-	-- Cleanup if character dies or is removed
-	table.insert(p.connections, char.AncestryChanged:Connect(function(_, parent)
-		if not parent then
-			self:_detachPlayer(plr)
-		end
-	end))
-end
-
-function Controller:_detachPlayer(plr: Player)
-	local p = self._perPlayer[plr]
-	if not p then return end
-
-	for _, c in ipairs(p.connections) do pcall(function() c:Disconnect() end) end
-	if p.nameBillboard then p.nameBillboard:Destroy() end
-	if p.lines then clearDrawingTable(p.lines) end
-	if p.box then
-		for _, l in fastPairs(p.box) do if l and l.Remove then l:Remove() end end
-		p.box = nil
-	end
-	self._perPlayer[plr] = nil
-end
-
-function Controller:_updateColorAll(color: Color3)
-	for _, pdata in fastPairs(self._perPlayer) do
-		for _, l in fastPairs(pdata.lines) do l.Color = color end
-		if pdata.box then
-			for _, l in fastPairs(pdata.box) do l.Color = color end
-		end
-		if pdata.nameBillboard then
-			local tl = pdata.nameBillboard:FindFirstChild("Label") :: TextLabel?
-			if tl then tl.TextColor3 = color end
-		end
-	end
-end
-
-function Controller:_project(part: BasePart)
-	local v3, vis = Camera:WorldToViewportPoint(part.Position)
-	return Vector2.new(v3.X, v3.Y), vis
-end
-
-function Controller:_updateSkeleton(char: Model, pdata)
-	if not self.features.skeleton then
-		for _, l in fastPairs(pdata.lines) do l.Visible = false end
-		return
-	end
-
-	for i, pair in ipairs(SKELETON_CONNECTIONS) do
-		local a = char:FindFirstChild(pair[1]) :: BasePart?
-		local b = char:FindFirstChild(pair[2]) :: BasePart?
-		local la = pdata.lines[i]
-		if a and b then
-			local p0, v0 = self:_project(a)
-			local p1, v1 = self:_project(b)
-			if v0 and v1 then
-				la.From = p0
-				la.To = p1
-				la.Visible = self.enabled
-				la.Color = self._currentColor
-			else
-				la.Visible = false
-			end
-		else
-			la.Visible = false
-		end
-	end
-end
-
-local corners = table.create(8)
-function Controller:_updateBox(char: Model, pdata)
-	if not self.features.box then
-		if pdata.box then for _, l in fastPairs(pdata.box) do l.Visible = false end end
-		return
-	end
-
-	local count = 0
-	for _, part in ipairs(char:GetChildren()) do
-		if part:IsA("BasePart") and part.Parent == char then
-			local size = part.Size * 0.5
-			for x = -1,1,2 do
-				for y = -1,1,2 do
-					for z = -1,1,2 do
-						count += 1
-						local c3 = part.CFrame:PointToWorldSpace(Vector3.new(size.X*x, size.Y*y, size.Z*z))
-						local sp, vis = Camera:WorldToViewportPoint(c3)
-						if vis then
-							corners[count] = Vector2.new(sp.X, sp.Y)
-						else
-							corners[count] = nil
-						end
-					end
-				end
-			end
-		end
-	end
-
-	local minX, minY = math.huge, math.huge
-	local maxX, maxY = -math.huge, -math.huge
-	for i = 1, count do
-		local p = corners[i]
-		if p then
-			if p.X < minX then minX = p.X end
-			if p.Y < minY then minY = p.Y end
-			if p.X > maxX then maxX = p.X end
-			if p.Y > maxY then maxY = p.Y end
-		end
-	end
-
-	if minX < math.huge then
-		local bb = pdata.box
-		bb.Top.From, bb.Top.To = Vector2.new(minX,minY), Vector2.new(maxX,minY)
-		bb.Bottom.From, bb.Bottom.To = Vector2.new(minX,maxY), Vector2.new(maxX,maxY)
-		bb.Left.From, bb.Left.To = Vector2.new(minX,minY), Vector2.new(minX,maxY)
-		bb.Right.From, bb.Right.To = Vector2.new(maxX,minY), Vector2.new(maxX,maxY)
-		for _, l in fastPairs(bb) do
-			l.Visible = self.enabled
-			l.Color = self._currentColor
-		end
-	else
-		for _, l in fastPairs(pdata.box) do l.Visible = false end
-	end
-end
-
-function Controller:_tickColor(dt:number)
-	if self.rainbow then
-		self._hue = (self._hue + dt * self.rainbowSpeed) % 1
-		self._currentColor = Color3.fromHSV(self._hue, 1, 1)
-	else
-		self._currentColor = self.color
-	end
-end
-
-function Controller:_step(dt:number)
-	if not self.enabled then
-		-- ensure hidden when disabled
-		for _, pdata in fastPairs(self._perPlayer) do
-			for _, l in fastPairs(pdata.lines) do l.Visible = false end
-			if pdata.box then for _, l in fastPairs(pdata.box) do l.Visible = false end end
-		end
-		return
-	end
-
-	self:_tickColor(dt)
-
+function ESP.new(config)
+	config = config or {}
+	local self = setmetatable({}, ESP)
+	
+	self.enabled = config.enabled or false
+	self.rainbow = config.rainbow or false
+	self.color = config.color or Color3.new(0, 1, 0)
+	self.defaultColor = self.color
+	self.showSkeleton = config.showSkeleton ~= false
+	self.showBox = config.showBox ~= false
+	self.showName = config.showName ~= false
+	self.hue = 0
+	self.drawings = {}
+	
+	-- ScreenGui for names
+	self.screenGui = Instance.new("ScreenGui")
+	self.screenGui.Name = "ESPGui"
+	self.screenGui.ResetOnSpawn = false
+	self.screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	
+	-- Connections
+	self.playerAddedConn = Players.PlayerAdded:Connect(function(plr)
+		self:AddPlayer(plr)
+	end)
+	self.playerRemovingConn = Players.PlayerRemoving:Connect(function(plr)
+		self:RemovePlayer(plr)
+	end)
+	
+	-- Add existing players
 	for _, plr in ipairs(Players:GetPlayers()) do
-		if self.ignoreLocal and plr == LocalPlayer then continue end
-		local pdata = self._perPlayer[plr]
+		if plr ~= LocalPlayer then
+			self:AddPlayer(plr)
+		end
+	end
+	
+	-- Render loop
+	self.renderConn = RunService.RenderStepped:Connect(function(dt)
+		self:Update(dt)
+	end)
+	
+	return self
+end
+
+function ESP:AddPlayer(plr)
+	if plr == LocalPlayer then return end
+	
+	local data = {
+		skeleton = {},
+		box = {},
+		name = nil,
+		charAddedConn = nil,
+	}
+	
+	-- Skeleton lines
+	for i = 1, #Connections do
+		local line = Drawing.new("Line")
+		line.Thickness = 2
+		line.Visible = false
+		data.skeleton[i] = line
+	end
+	
+	-- Box lines
+	local boxLines = {}
+	for _, dir in ipairs({"Top", "Bottom", "Left", "Right"}) do
+		local line = Drawing.new("Line")
+		line.Thickness = 2
+		line.Visible = false
+		boxLines[dir] = line
+	end
+	data.box = boxLines
+	
+	-- Name TextLabel with custom font and stroke
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0, 200, 0, 20)  -- Fixed pixel size, centered dynamically
+	label.BackgroundTransparency = 1
+	label.TextColor3 = Color3.new(1, 1, 1)  -- White text by default, can change with color
+	label.Text = plr.Name
+	label.FontFace = Font.new("rbxassetid://12187365977")  -- Rubik font
+	label.TextSize = 14
+	label.TextWrapped = false
+	label.Visible = false
+	label.Parent = self.screenGui
+	
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 3  -- Thick black stroke
+	stroke.Color = Color3.new(0, 0, 0)
+	stroke.Transparency = 0
+	stroke.Parent = label
+	
+	data.name = label
+	
+	-- Handle character respawn (no need for extra logic, update checks char)
+	data.charAddedConn = plr.CharacterAdded:Connect(function() end)  -- Placeholder to disconnect later
+	
+	self.drawings[plr] = data
+end
+
+function ESP:RemovePlayer(plr)
+	local data = self.drawings[plr]
+	if data then
+		for _, line in ipairs(data.skeleton) do
+			line:Remove()
+		end
+		for _, line in pairs(data.box) do
+			line:Remove()
+		end
+		if data.name then
+			data.name:Destroy()
+		end
+		if data.charAddedConn then
+			data.charAddedConn:Disconnect()
+		end
+		self.drawings[plr] = nil
+	end
+end
+
+function ESP:Update(dt)
+	if not self.enabled then return end
+	
+	local color = self.color
+	if self.rainbow then
+		self.hue = (self.hue + dt * 0.2) % 1
+		color = Color3.fromHSV(self.hue, 1, 1)
+	end
+	
+	local cam = workspace.CurrentCamera
+	
+	for plr, data in pairs(self.drawings) do
 		local char = plr.Character
-		if char and char.Parent then
-			if not pdata then
-				self:_attachCharacter(plr, char)
-				pdata = self._perPlayer[plr]
-			end
-			-- keep name billboard in sync with feature toggle
-			if pdata then
-				if self.features.names then
-					if not pdata.nameBillboard then
-						local bb = mkBillboard(char, plr.DisplayName or plr.Name)
-						if bb then
-							bb.Parent = char
-							pdata.nameBillboard = bb
+		local hum = char and char:FindFirstChild("Humanoid")
+		if char and char:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0 then
+			-- Skeleton
+			if self.showSkeleton then
+				for i, pair in ipairs(Connections) do
+					local part0 = char:FindFirstChild(pair[1])
+					local part1 = char:FindFirstChild(pair[2])
+					local line = data.skeleton[i]
+					if part0 and part1 then
+						local pos0, vis0 = cam:WorldToViewportPoint(part0.Position)
+						local pos1, vis1 = cam:WorldToViewportPoint(part1.Position)
+						if vis0 and vis1 and pos0.Z > 0 and pos1.Z > 0 then
+							line.From = Vector2.new(pos0.X, pos0.Y)
+							line.To = Vector2.new(pos1.X, pos1.Y)
+							line.Color = color
+							line.Visible = true
+						else
+							line.Visible = false
 						end
 					else
-						local tl = pdata.nameBillboard:FindFirstChild("Label") :: TextLabel?
-						if tl then tl.TextColor3 = self._currentColor end
+						line.Visible = false
 					end
-				elseif pdata.nameBillboard then
-					pdata.nameBillboard.Enabled = false
 				end
-
-				self:_updateSkeleton(char, pdata)
-				self:_updateBox(char, pdata)
+			else
+				for _, line in ipairs(data.skeleton) do
+					line.Visible = false
+				end
 			end
-		elseif pdata then
-			self:_detachPlayer(plr)
+			
+			-- Bounding Box
+			if self.showBox then
+				local points = {}
+				for _, part in ipairs(char:GetChildren()) do
+					if part:IsA("BasePart") then
+						local cf = part.CFrame
+						local halfSize = part.Size / 2
+						for x = -1, 1, 2 do
+							for y = -1, 1, 2 do
+								for z = -1, 1, 2 do
+									local corner = cf * Vector3.new(x * halfSize.X, y * halfSize.Y, z * halfSize.Z)
+									local screen, vis = cam:WorldToViewportPoint(corner)
+									if vis and screen.Z > 0 then
+										table.insert(points, Vector2.new(screen.X, screen.Y))
+									end
+								end
+							end
+						end
+					end
+				end
+				
+				if #points > 0 then
+					local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
+					for _, p in ipairs(points) do
+						minX = math.min(minX, p.X)
+						maxX = math.max(maxX, p.X)
+						minY = math.min(minY, p.Y)
+						maxY = math.max(maxY, p.Y)
+					end
+					
+					local bb = data.box
+					bb.Top.From = Vector2.new(minX, minY)
+					bb.Top.To = Vector2.new(maxX, minY)
+					bb.Bottom.From = Vector2.new(minX, maxY)
+					bb.Bottom.To = Vector2.new(maxX, maxY)
+					bb.Left.From = Vector2.new(minX, minY)
+					bb.Left.To = Vector2.new(minX, maxY)
+					bb.Right.From = Vector2.new(maxX, minY)
+					bb.Right.To = Vector2.new(maxX, maxY)
+					
+					for _, l in pairs(bb) do
+						l.Color = color
+						l.Visible = true
+					end
+				else
+					for _, l in pairs(data.box) do
+						l.Visible = false
+					end
+				end
+			else
+				for _, l in pairs(data.box) do
+					l.Visible = false
+				end
+			end
+			
+			-- Name
+			if self.showName then
+				local head = char:FindFirstChild("Head")
+				if head then
+					local offsetPos = head.Position + Vector3.new(0, head.Size.Y / 2 + 1, 0)  -- Slightly above head
+					local pos, vis = cam:WorldToViewportPoint(offsetPos)
+					if vis and pos.Z > 0 then
+						-- Center the label
+						data.name.Position = UDim2.new(0, pos.X - 100, 0, pos.Y - 10)  -- Offset half size (200/2=100, 20/2=10)
+						data.name.TextColor3 = color  -- Use ESP color for text
+						data.name.Visible = true
+					else
+						data.name.Visible = false
+					end
+				else
+					data.name.Visible = false
+				end
+			else
+				data.name.Visible = false
+			end
+		else
+			-- Hide everything if no char or dead
+			for _, line in ipairs(data.skeleton) do line.Visible = false end
+			for _, l in pairs(data.box) do l.Visible = false end
+			data.name.Visible = false
 		end
 	end
 end
 
--- Public API
-function Controller:toggle(on: boolean?)
-	self.enabled = if on == nil then not self.enabled else on
-	return self
-end
-
-function Controller:setColor(c: Color3)
-	self.color = c
-	if not self.rainbow then
-		self._currentColor = c
-		self:_updateColorAll(c)
-	end
-	return self
-end
-
-function Controller:setRainbow(on: boolean?)
-	self.rainbow = if on == nil then not self.rainbow else on
-	if not self.rainbow then
-		self._currentColor = self.color
-		self:_updateColorAll(self.color)
-	end
-	return self
-end
-
-function Controller:setFeatures(f: FeatureSet)
-	for k, v in fastPairs(f) do
-		if self.features[k] ~= nil then self.features[k] = v and true or false end
-	end
-	-- hide elements for newly disabled features immediately
-	for _, pdata in fastPairs(self._perPlayer) do
-		if f.skeleton == false then for _, l in fastPairs(pdata.lines) do l.Visible = false end end
-		if f.box == false and pdata.box then for _, l in fastPairs(pdata.box) do l.Visible = false end end
-		if f.names ~= nil and pdata.nameBillboard then pdata.nameBillboard.Enabled = self.features.names end
-	end
-	return self
-end
-
-function Controller:include(feature: "box"|"skeleton"|"names")
-	self:setFeatures({[feature] = true}); return self
-end
-
-function Controller:exclude(feature: "box"|"skeleton"|"names")
-	self:setFeatures({[feature] = false}); return self
-end
-
-function Controller:destroy()
-	if self._rsConn then self._rsConn:Disconnect() end
-	if self._plrAdded then self._plrAdded:Disconnect() end
-	if self._plrRemoving then self._plrRemoving:Disconnect() end
-	for _, plr in ipairs(Players:GetPlayers()) do self:_detachPlayer(plr) end
-	table.clear(self._perPlayer)
-end
-
-local ESP = {}
-
-function ESP.init(cfgTable)
-	local self = setmetatable({}, Controller)
-	self.enabled = (cfgTable and cfgTable.enabled) or DEFAULTS.enabled
-	self.color = (cfgTable and cfgTable.color) or DEFAULTS.color
-	self._currentColor = self.color
-	self.rainbow = (cfgTable and cfgTable.rainbow) or DEFAULTS.rainbow
-	self.rainbowSpeed = (cfgTable and cfgTable.rainbowSpeed) or DEFAULTS.rainbowSpeed
-	self.features = table.clone(DEFAULTS.features)
-	if cfgTable and cfgTable.features then
-		for k, v in fastPairs(cfgTable.features) do
-			if self.features[k] ~= nil then self.features[k] = v and true or false end
+function ESP:Toggle()
+	self.enabled = not self.enabled
+	if not self.enabled then
+		for _, data in pairs(self.drawings) do
+			for _, line in ipairs(data.skeleton) do line.Visible = false end
+			for _, l in pairs(data.box) do l.Visible = false end
+			data.name.Visible = false
 		end
 	end
-	self.ignoreLocal = (cfgTable and cfgTable.ignoreLocal) ~= false -- default true
-	self._hue = 0
-	self._perPlayer = {}
+end
 
-	-- attach existing chars
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if self.ignoreLocal and plr == LocalPlayer then continue end
-		if plr.Character then self:_attachCharacter(plr, plr.Character) end
+function ESP:SetColor(newColor)
+	self.color = newColor
+	self.defaultColor = newColor  -- Update default if changed
+end
+
+function ESP:ToggleRainbow()
+	self.rainbow = not self.rainbow
+	if not self.rainbow then
+		self.color = self.defaultColor
 	end
+end
 
-	self._plrAdded = Players.PlayerAdded:Connect(function(plr)
-		if self.ignoreLocal and plr == LocalPlayer then return end
-		plr.CharacterAdded:Connect(function(char) self:_attachCharacter(plr, char) end)
-	end)
+function ESP:IncludeSkeleton()
+	self.showSkeleton = true
+end
 
-	self._plrRemoving = Players.PlayerRemoving:Connect(function(plr)
-		self:_detachPlayer(plr)
-	end)
+function ESP:ExcludeSkeleton()
+	self.showSkeleton = false
+end
 
-	-- Low-overhead per-frame update. Uses RenderStepped so projection matches current camera.
-	self._rsConn = RunService.RenderStepped:Connect(function(dt) self:_step(dt) end)
+function ESP:IncludeBox()
+	self.showBox = true
+end
 
-	return self
+function ESP:ExcludeBox()
+	self.showBox = false
+end
+
+function ESP:IncludeNames()
+	self.showName = true
+end
+
+function ESP:ExcludeNames()
+	self.showName = false
+end
+
+function ESP:Destroy()
+	if self.renderConn then self.renderConn:Disconnect() end
+	if self.playerAddedConn then self.playerAddedConn:Disconnect() end
+	if self.playerRemovingConn then self.playerRemovingConn:Disconnect() end
+	for plr in pairs(self.drawings) do
+		self:RemovePlayer(plr)
+	end
+	if self.screenGui then self.screenGui:Destroy() end
 end
 
 return ESP
