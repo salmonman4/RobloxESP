@@ -1,4 +1,4 @@
--- ModuleScript (e.g., place in ReplicatedStorage or ServerScriptService, but since Local, probably StarterPlayerScripts as Local Module)
+-- ModuleScript
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -28,7 +28,7 @@ ESP.__index = ESP
 function ESP.new(config)
 	config = config or {}
 	local self = setmetatable({}, ESP)
-	
+
 	self.enabled = config.enabled or false
 	self.rainbow = config.rainbow or false
 	self.color = config.color or Color3.new(0, 1, 0)
@@ -38,13 +38,14 @@ function ESP.new(config)
 	self.showName = config.showName ~= false
 	self.hue = 0
 	self.drawings = {}
-	
+
 	-- ScreenGui for names
 	self.screenGui = Instance.new("ScreenGui")
 	self.screenGui.Name = "ESPGui"
+	self.screenGui.IgnoreGuiInset = true
 	self.screenGui.ResetOnSpawn = false
 	self.screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-	
+
 	-- Connections
 	self.playerAddedConn = Players.PlayerAdded:Connect(function(plr)
 		self:AddPlayer(plr)
@@ -52,32 +53,32 @@ function ESP.new(config)
 	self.playerRemovingConn = Players.PlayerRemoving:Connect(function(plr)
 		self:RemovePlayer(plr)
 	end)
-	
+
 	-- Add existing players
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
 			self:AddPlayer(plr)
 		end
 	end
-	
+
 	-- Render loop
 	self.renderConn = RunService.RenderStepped:Connect(function(dt)
 		self:Update(dt)
 	end)
-	
+
 	return self
 end
 
 function ESP:AddPlayer(plr)
 	if plr == LocalPlayer then return end
-	
+
 	local data = {
 		skeleton = {},
 		box = {},
 		name = nil,
 		charAddedConn = nil,
 	}
-	
+
 	-- Skeleton lines
 	for i = 1, #Connections do
 		local line = Drawing.new("Line")
@@ -85,7 +86,7 @@ function ESP:AddPlayer(plr)
 		line.Visible = false
 		data.skeleton[i] = line
 	end
-	
+
 	-- Box lines
 	local boxLines = {}
 	for _, dir in ipairs({"Top", "Bottom", "Left", "Right"}) do
@@ -95,160 +96,75 @@ function ESP:AddPlayer(plr)
 		boxLines[dir] = line
 	end
 	data.box = boxLines
-	
-	-- Name TextLabel with custom font and stroke
+
+	-- Name TextLabel with forced fixed size
 	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0, 200, 0, 20)  -- Fixed pixel size, centered dynamically
+	label.Size = UDim2.fromOffset(200, 20) -- fixed pixel size
 	label.BackgroundTransparency = 1
-	label.TextColor3 = Color3.new(1, 1, 1)  -- White text by default, can change with color
+	label.TextColor3 = Color3.new(1, 1, 1)
 	label.Text = plr.Name
-	label.FontFace = Font.new("rbxassetid://12187365977")  -- Rubik font
+	label.FontFace = Font.new("rbxassetid://12187365977")
 	label.TextSize = 14
-	label.TextWrapped = false
+	label.TextScaled = false
+	label.AutomaticSize = Enum.AutomaticSize.None
+	label.SizeConstraint = Enum.SizeConstraint.RelativeXY
 	label.Visible = false
 	label.Parent = self.screenGui
-	
+
 	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 3  -- Thick black stroke
+	stroke.Thickness = 3
 	stroke.Color = Color3.new(0, 0, 0)
 	stroke.Transparency = 0
 	stroke.Parent = label
-	
+
 	data.name = label
-	
-	-- Handle character respawn (no need for extra logic, update checks char)
-	data.charAddedConn = plr.CharacterAdded:Connect(function() end)  -- Placeholder to disconnect later
-	
+	data.charAddedConn = plr.CharacterAdded:Connect(function() end)
+
 	self.drawings[plr] = data
 end
 
 function ESP:RemovePlayer(plr)
 	local data = self.drawings[plr]
 	if data then
-		for _, line in ipairs(data.skeleton) do
-			line:Remove()
-		end
-		for _, line in pairs(data.box) do
-			line:Remove()
-		end
-		if data.name then
-			data.name:Destroy()
-		end
-		if data.charAddedConn then
-			data.charAddedConn:Disconnect()
-		end
+		for _, line in ipairs(data.skeleton) do line:Remove() end
+		for _, line in pairs(data.box) do line:Remove() end
+		if data.name then data.name:Destroy() end
+		if data.charAddedConn then data.charAddedConn:Disconnect() end
 		self.drawings[plr] = nil
 	end
 end
 
 function ESP:Update(dt)
 	if not self.enabled then return end
-	
+
 	local color = self.color
 	if self.rainbow then
 		self.hue = (self.hue + dt * 0.2) % 1
 		color = Color3.fromHSV(self.hue, 1, 1)
 	end
-	
+
 	local cam = workspace.CurrentCamera
-	
+
 	for plr, data in pairs(self.drawings) do
 		local char = plr.Character
 		local hum = char and char:FindFirstChild("Humanoid")
 		if char and char:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0 then
-			-- Skeleton
-			if self.showSkeleton then
-				for i, pair in ipairs(Connections) do
-					local part0 = char:FindFirstChild(pair[1])
-					local part1 = char:FindFirstChild(pair[2])
-					local line = data.skeleton[i]
-					if part0 and part1 then
-						local pos0, vis0 = cam:WorldToViewportPoint(part0.Position)
-						local pos1, vis1 = cam:WorldToViewportPoint(part1.Position)
-						if vis0 and vis1 and pos0.Z > 0 and pos1.Z > 0 then
-							line.From = Vector2.new(pos0.X, pos0.Y)
-							line.To = Vector2.new(pos1.X, pos1.Y)
-							line.Color = color
-							line.Visible = true
-						else
-							line.Visible = false
-						end
-					else
-						line.Visible = false
-					end
-				end
-			else
-				for _, line in ipairs(data.skeleton) do
-					line.Visible = false
-				end
-			end
-			
-			-- Bounding Box
-			if self.showBox then
-				local points = {}
-				for _, part in ipairs(char:GetChildren()) do
-					if part:IsA("BasePart") then
-						local cf = part.CFrame
-						local halfSize = part.Size / 2
-						for x = -1, 1, 2 do
-							for y = -1, 1, 2 do
-								for z = -1, 1, 2 do
-									local corner = cf * Vector3.new(x * halfSize.X, y * halfSize.Y, z * halfSize.Z)
-									local screen, vis = cam:WorldToViewportPoint(corner)
-									if vis and screen.Z > 0 then
-										table.insert(points, Vector2.new(screen.X, screen.Y))
-									end
-								end
-							end
-						end
-					end
-				end
-				
-				if #points > 0 then
-					local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
-					for _, p in ipairs(points) do
-						minX = math.min(minX, p.X)
-						maxX = math.max(maxX, p.X)
-						minY = math.min(minY, p.Y)
-						maxY = math.max(maxY, p.Y)
-					end
-					
-					local bb = data.box
-					bb.Top.From = Vector2.new(minX, minY)
-					bb.Top.To = Vector2.new(maxX, minY)
-					bb.Bottom.From = Vector2.new(minX, maxY)
-					bb.Bottom.To = Vector2.new(maxX, maxY)
-					bb.Left.From = Vector2.new(minX, minY)
-					bb.Left.To = Vector2.new(minX, maxY)
-					bb.Right.From = Vector2.new(maxX, minY)
-					bb.Right.To = Vector2.new(maxX, maxY)
-					
-					for _, l in pairs(bb) do
-						l.Color = color
-						l.Visible = true
-					end
-				else
-					for _, l in pairs(data.box) do
-						l.Visible = false
-					end
-				end
-			else
-				for _, l in pairs(data.box) do
-					l.Visible = false
-				end
-			end
-			
+
 			-- Name
-			if self.showName then
+			if self.showName and data.name then
 				local head = char:FindFirstChild("Head")
 				if head then
-					local offsetPos = head.Position + Vector3.new(0, head.Size.Y / 2 + 1, 0)  -- Slightly above head
+					local offsetPos = head.Position + Vector3.new(0, head.Size.Y / 2 + 1, 0)
 					local pos, vis = cam:WorldToViewportPoint(offsetPos)
 					if vis and pos.Z > 0 then
-						-- Center the label
 						data.name.Position = UDim2.fromOffset(pos.X - 100, pos.Y - 10)
-						data.name.TextColor3 = color  -- Use ESP color for text
+						data.name.TextColor3 = color
 						data.name.Visible = true
+						-- debug: ensure Roblox is not changing TextSize
+						if data.name.TextSize ~= 14 then
+							print("Warning: TextSize changed by Roblox:", data.name.TextSize)
+							data.name.TextSize = 14
+						end
 					else
 						data.name.Visible = false
 					end
@@ -256,13 +172,13 @@ function ESP:Update(dt)
 					data.name.Visible = false
 				end
 			else
-				data.name.Visible = false
+				if data.name then data.name.Visible = false end
 			end
+
 		else
-			-- Hide everything if no char or dead
 			for _, line in ipairs(data.skeleton) do line.Visible = false end
 			for _, l in pairs(data.box) do l.Visible = false end
-			data.name.Visible = false
+			if data.name then data.name.Visible = false end
 		end
 	end
 end
@@ -273,14 +189,14 @@ function ESP:Toggle()
 		for _, data in pairs(self.drawings) do
 			for _, line in ipairs(data.skeleton) do line.Visible = false end
 			for _, l in pairs(data.box) do l.Visible = false end
-			data.name.Visible = false
+			if data.name then data.name.Visible = false end
 		end
 	end
 end
 
 function ESP:SetColor(newColor)
 	self.color = newColor
-	self.defaultColor = newColor  -- Update default if changed
+	self.defaultColor = newColor
 end
 
 function ESP:ToggleRainbow()
@@ -290,37 +206,18 @@ function ESP:ToggleRainbow()
 	end
 end
 
-function ESP:IncludeSkeleton()
-	self.showSkeleton = true
-end
-
-function ESP:ExcludeSkeleton()
-	self.showSkeleton = false
-end
-
-function ESP:IncludeBox()
-	self.showBox = true
-end
-
-function ESP:ExcludeBox()
-	self.showBox = false
-end
-
-function ESP:IncludeNames()
-	self.showName = true
-end
-
-function ESP:ExcludeNames()
-	self.showName = false
-end
+function ESP:IncludeSkeleton() self.showSkeleton = true end
+function ESP:ExcludeSkeleton() self.showSkeleton = false end
+function ESP:IncludeBox() self.showBox = true end
+function ESP:ExcludeBox() self.showBox = false end
+function ESP:IncludeNames() self.showName = true end
+function ESP:ExcludeNames() self.showName = false end
 
 function ESP:Destroy()
 	if self.renderConn then self.renderConn:Disconnect() end
 	if self.playerAddedConn then self.playerAddedConn:Disconnect() end
 	if self.playerRemovingConn then self.playerRemovingConn:Disconnect() end
-	for plr in pairs(self.drawings) do
-		self:RemovePlayer(plr)
-	end
+	for plr in pairs(self.drawings) do self:RemovePlayer(plr) end
 	if self.screenGui then self.screenGui:Destroy() end
 end
 
