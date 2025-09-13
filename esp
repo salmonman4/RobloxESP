@@ -1,0 +1,337 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local Connections = {
+	{"Head", "UpperTorso"},
+	{"UpperTorso", "LowerTorso"},
+	{"UpperTorso", "LeftUpperArm"},
+	{"UpperTorso", "RightUpperArm"},
+	{"LeftUpperArm", "LeftLowerArm"},
+	{"RightUpperArm", "RightLowerArm"},
+	{"LeftLowerArm", "LeftHand"},
+	{"RightLowerArm", "RightHand"},
+	{"LowerTorso", "LeftUpperLeg"},
+	{"LowerTorso", "RightUpperLeg"},
+	{"LeftUpperLeg", "LeftLowerLeg"},
+	{"RightUpperLeg", "RightLowerLeg"},
+	{"LeftLowerLeg", "LeftFoot"},
+	{"RightLowerLeg", "RightFoot"},
+}
+
+local ESP = {}
+ESP.__index = ESP
+
+local function attachNameTag(self, plr, data)
+	if data.bb then
+		data.bb:Destroy()
+		data.bb = nil
+		data.name = nil
+	end
+	local char = plr.Character
+	if not char then return end
+	local head = char:FindFirstChild("Head")
+	if not head then return end
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "ESPNametag"
+	bb.Adornee = head
+	bb.Parent = head
+	bb.AlwaysOnTop = true
+	bb.LightInfluence = 0
+	bb.Size = UDim2.fromScale(2, 0.2) -- Scale-based sizing
+	bb.ExtentsOffsetWorldSpace = Vector3.new(0, head.Size.Y / 2 + 2.5, 0) -- 2.5 studs above head
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1) -- Scale-based sizing
+	label.BackgroundTransparency = 1
+	label.Text = plr.Name
+	label.FontFace = Font.new("rbxassetid://12187365977")
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.Visible = false
+	label.Parent = bb
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 5
+	stroke.Color = Color3.new(0, 0, 0)
+	stroke.Transparency = 0
+	stroke.Parent = label
+	data.bb = bb
+	data.name = label
+end
+
+function ESP.new(config)
+	config = config or {}
+	local self = setmetatable({}, ESP)
+	
+	self.enabled = config.enabled or false
+	self.rainbow = config.rainbow or false
+	self.color = config.color or Color3.new(0, 1, 0)
+	self.defaultColor = self.color
+	self.showSkeleton = config.showSkeleton ~= false
+	self.showBox = config.showBox ~= false
+	self.showName = config.showName ~= false
+	self.maxDistance = config.maxDistance or 100
+	self.hue = 0
+	self.drawings = {}
+	self.frameCounter = 0
+	self.boxUpdateInterval = 3
+	
+	-- Connections
+	self.playerAddedConn = Players.PlayerAdded:Connect(function(plr)
+		self:AddPlayer(plr)
+	end)
+	self.playerRemovingConn = Players.PlayerRemoving:Connect(function(plr)
+		self:RemovePlayer(plr)
+	end)
+	
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			self:AddPlayer(plr)
+		end
+	end
+	
+	self.renderConn = RunService.RenderStepped:Connect(function(dt)
+		self:Update(dt)
+	end)
+	
+	return self
+end
+
+function ESP:AddPlayer(plr)
+	if plr == LocalPlayer then return end
+	
+	local data = {
+		skeleton = {},
+		box = {},
+		name = nil,
+		bb = nil,
+		charAddedConn = nil,
+		lastBoxUpdate = nil,
+	}
+	
+	for i = 1, #Connections do
+		local line = Drawing.new("Line")
+		line.Thickness = 2
+		line.Visible = false
+		data.skeleton[i] = line
+	end
+	
+	local boxLines = {}
+	for _, dir in ipairs({"Top", "Bottom", "Left", "Right"}) do
+		local line = Drawing.new("Line")
+		line.Thickness = 2
+		line.Visible = false
+		boxLines[dir] = line
+	end
+	data.box = boxLines
+	
+	attachNameTag(self, plr, data)
+	data.charAddedConn = plr.CharacterAdded:Connect(function()
+		attachNameTag(self, plr, data)
+	end)
+	
+	self.drawings[plr] = data
+end
+
+function ESP:RemovePlayer(plr)
+	local data = self.drawings[plr]
+	if data then
+		for _, line in ipairs(data.skeleton) do
+			line:Remove()
+		end
+		for _, line in pairs(data.box) do
+			line:Remove()
+		end
+		if data.bb then
+			data.bb:Destroy()
+		end
+		if data.charAddedConn then
+			data.charAddedConn:Disconnect()
+		end
+		self.drawings[plr] = nil
+	end
+end
+
+function ESP:Update(dt)
+	if not self.enabled then return end
+	
+	local color = self.color
+	if self.rainbow then
+		self.hue = (self.hue + dt * 0.2) % 1
+		color = Color3.fromHSV(self.hue, 1, 1)
+	end
+	
+	self.frameCounter = (self.frameCounter + 1) % self.boxUpdateInterval
+	local updateBoxes = self.frameCounter == 0
+	
+	local cam = workspace.CurrentCamera
+	local localPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	localPos = localPos and localPos.Position or cam.CFrame.Position
+	
+	for plr, data in pairs(self.drawings) do
+		local char = plr.Character
+		local hum = char and char:FindFirstChild("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if char and root and hum and hum.Health > 0 then
+			local distance = (root.Position - localPos).Magnitude
+			if distance > self.maxDistance then
+				for _, line in ipairs(data.skeleton) do line.Visible = false end
+				for _, l in pairs(data.box) do l.Visible = false end
+				if data.name then data.name.Visible = false end
+				continue
+			end
+			
+			if self.showSkeleton then
+				for i, pair in ipairs(Connections) do
+					local part0 = char:FindFirstChild(pair[1])
+					local part1 = char:FindFirstChild(pair[2])
+					local line = data.skeleton[i]
+					if part0 and part1 then
+						local pos0, vis0 = cam:WorldToViewportPoint(part0.Position)
+						local pos1, vis1 = cam:WorldToViewportPoint(part1.Position)
+						if vis0 and vis1 and pos0.Z > 0 and pos1.Z > 0 then
+							line.From = Vector2.new(pos0.X, pos0.Y)
+							line.To = Vector2.new(pos1.X, pos1.Y)
+							line.Color = color
+							line.Visible = true
+						else
+							line.Visible = false
+						end
+					else
+						line.Visible = false
+					end
+				end
+			else
+				for _, line in ipairs(data.skeleton) do
+					line.Visible = false
+				end
+			end
+			
+			if self.showBox and updateBoxes then
+				local size = Vector3.new(5, 7, 2)
+				local cf = root.CFrame
+				local halfSize = size / 2
+				local points = {}
+				for x = -1, 1, 2 do
+					for y = -1, 1, 2 do
+						for z = -1, 1, 2 do
+							local corner = cf * Vector3.new(x * halfSize.X, y * halfSize.Y, z * halfSize.Z)
+							local screen, vis = cam:WorldToViewportPoint(corner)
+							if vis and screen.Z > 0 then
+								table.insert(points, Vector2.new(screen.X, screen.Y))
+							end
+						end
+					end
+				end
+				
+				if #points >= 4 then
+					local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
+					for _, p in ipairs(points) do
+						minX = math.min(minX, p.X)
+						maxX = math.max(maxX, p.X)
+						minY = math.min(minY, p.Y)
+						maxY = math.max(maxY, p.Y)
+					end
+					
+					local bb = data.box
+					bb.Top.From = Vector2.new(minX, minY)
+					bb.Top.To = Vector2.new(maxX, minY)
+					bb.Bottom.From = Vector2.new(minX, maxY)
+					bb.Bottom.To = Vector2.new(maxX, maxY)
+					bb.Left.From = Vector2.new(minX, minY)
+					bb.Left.To = Vector2.new(minX, maxY)
+					bb.Right.From = Vector2.new(maxX, minY)
+					bb.Right.To = Vector2.new(maxX, maxY)
+					
+					for _, l in pairs(bb) do
+						l.Color = color
+						l.Visible = true
+					end
+					
+					data.lastBoxUpdate = {minX = minX, maxX = maxX, minY = minY, maxY = maxY}
+				else
+					for _, l in pairs(data.box) do
+						l.Visible = false
+					end
+				end
+			elseif self.showBox and data.lastBoxUpdate then
+				local bb = data.box
+				bb.Top.From = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.minY)
+				bb.Top.To = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.minY)
+				bb.Bottom.From = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.maxY)
+				bb.Bottom.To = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.maxY)
+				bb.Left.From = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.minY)
+				bb.Left.To = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.maxY)
+				bb.Right.From = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.minY)
+				bb.Right.To = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.maxY)
+				for _, l in pairs(bb) do
+					l.Color = color
+					l.Visible = true
+				end
+			else
+				for _, l in pairs(data.box) do
+					l.Visible = false
+				end
+			end
+			
+			if self.showName and data.name then
+				data.name.TextColor3 = color
+				data.name.Visible = true
+			else
+				if data.name then data.name.Visible = false end
+			end
+		else
+			for _, line in ipairs(data.skeleton) do line.Visible = false end
+			for _, l in pairs(data.box) do l.Visible = false end
+			if data.name then data.name.Visible = false end
+		end
+	end
+end
+
+function ESP:Toggle()
+	self.enabled = not self.enabled
+	if not self.enabled then
+		for _, data in pairs(self.drawings) do
+			for _, line in ipairs(data.skeleton) do line.Visible = false end
+			for _, l in pairs(data.box) do l.Visible = false end
+			if data.name then data.name.Visible = false end
+		end
+	end
+end
+
+function ESP:SetColor(newColor)
+	self.color = newColor
+	self.defaultColor = newColor
+end
+
+function ESP:ToggleRainbow()
+	self.rainbow = not self.rainbow
+	if not self.rainbow then
+		self.color = self.defaultColor
+	end
+end
+
+function ESP:SetMaxDistance(distance)
+	self.maxDistance = math.max(0, distance)
+end
+
+function ESP:IncludeSkeleton() self.showSkeleton = true end
+function ESP:ExcludeSkeleton() self.showSkeleton = false end
+function ESP:IncludeBox() self.showBox = true end
+function ESP:ExcludeBox() self.showBox = false end
+function ESP:IncludeNames() self.showName = true end
+function ESP:ExcludeNames() self.showName = false end
+function ESP:SetBoxUpdateInterval(interval)
+	self.boxUpdateInterval = math.max(1, interval)
+end
+
+function ESP:Destroy()
+	if self.renderConn then self.renderConn:Disconnect() end
+	if self.playerAddedConn then self.playerAddedConn:Disconnect() end
+	if self.playerRemovingConn then self.playerRemovingConn:Disconnect() end
+	for plr in pairs(self.drawings) do
+		self:RemovePlayer(plr)
+	end
+end
+
+return ESP
