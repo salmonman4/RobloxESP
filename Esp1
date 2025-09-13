@@ -33,22 +33,20 @@ local function attachNameTag(self, plr, data)
 	if not char then return end
 	local head = char:FindFirstChild("Head")
 	if not head then return end
-
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "ESPNametag"
 	bb.Adornee = head
 	bb.Parent = head
 	bb.AlwaysOnTop = true
 	bb.LightInfluence = 0
-	bb.Size = UDim2.fromOffset(200, 20)
-	bb.StudsOffset = Vector3.new(0, head.Size.Y/2 + 1, 0)
-
+	bb.Size = UDim2.fromOffset(200, 40) -- Increased height
+	bb.StudsOffset = Vector3.new(0, head.Size.Y / 2 + 2.5, 0) -- Higher above head
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
 	label.Text = plr.Name
 	label.FontFace = Font.new("rbxassetid://12187365977")
-	label.TextSize = 14
+	label.TextSize = 24 -- Larger minimum text size
 	label.TextScaled = false
 	label.AutomaticSize = Enum.AutomaticSize.None
 	label.SizeConstraint = Enum.SizeConstraint.RelativeXY
@@ -56,13 +54,11 @@ local function attachNameTag(self, plr, data)
 	label.TextYAlignment = Enum.TextYAlignment.Center
 	label.Visible = false
 	label.Parent = bb
-
 	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 3
+	stroke.Thickness = 5 -- Thicker stroke
 	stroke.Color = Color3.new(0, 0, 0)
 	stroke.Transparency = 0
 	stroke.Parent = label
-
 	data.bb = bb
 	data.name = label
 end
@@ -70,7 +66,7 @@ end
 function ESP.new(config)
 	config = config or {}
 	local self = setmetatable({}, ESP)
-
+	
 	self.enabled = config.enabled or false
 	self.rainbow = config.rainbow or false
 	self.color = config.color or Color3.new(0, 1, 0)
@@ -78,47 +74,54 @@ function ESP.new(config)
 	self.showSkeleton = config.showSkeleton ~= false
 	self.showBox = config.showBox ~= false
 	self.showName = config.showName ~= false
+	self.maxDistance = config.maxDistance or 100 -- Default max display distance (studs)
 	self.hue = 0
 	self.drawings = {}
-
+	self.frameCounter = 0
+	self.boxUpdateInterval = 3 -- Update boxes every 3 frames
+	
+	-- Connections
 	self.playerAddedConn = Players.PlayerAdded:Connect(function(plr)
 		self:AddPlayer(plr)
 	end)
 	self.playerRemovingConn = Players.PlayerRemoving:Connect(function(plr)
 		self:RemovePlayer(plr)
 	end)
-
+	
+	-- Add existing players
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
 			self:AddPlayer(plr)
 		end
 	end
-
+	
+	-- Render loop
 	self.renderConn = RunService.RenderStepped:Connect(function(dt)
 		self:Update(dt)
 	end)
-
+	
 	return self
 end
 
 function ESP:AddPlayer(plr)
 	if plr == LocalPlayer then return end
-
+	
 	local data = {
 		skeleton = {},
 		box = {},
 		name = nil,
 		bb = nil,
 		charAddedConn = nil,
+		lastBoxUpdate = nil,
 	}
-
+	
 	for i = 1, #Connections do
 		local line = Drawing.new("Line")
 		line.Thickness = 2
 		line.Visible = false
 		data.skeleton[i] = line
 	end
-
+	
 	local boxLines = {}
 	for _, dir in ipairs({"Top", "Bottom", "Left", "Right"}) do
 		local line = Drawing.new("Line")
@@ -127,41 +130,64 @@ function ESP:AddPlayer(plr)
 		boxLines[dir] = line
 	end
 	data.box = boxLines
-
+	
 	attachNameTag(self, plr, data)
 	data.charAddedConn = plr.CharacterAdded:Connect(function()
 		attachNameTag(self, plr, data)
 	end)
-
+	
 	self.drawings[plr] = data
 end
 
 function ESP:RemovePlayer(plr)
 	local data = self.drawings[plr]
 	if data then
-		for _, line in ipairs(data.skeleton) do line:Remove() end
-		for _, line in pairs(data.box) do line:Remove() end
-		if data.bb then data.bb:Destroy() end
-		if data.charAddedConn then data.charAddedConn:Disconnect() end
+		for _, line in ipairs(data.skeleton) do
+			line:Remove()
+		end
+		for _, line in pairs(data.box) do
+			line:Remove()
+		end
+		if data.bb then
+			data.bb:Destroy()
+		end
+		if data.charAddedConn then
+			data.charAddedConn:Disconnect()
+		end
 		self.drawings[plr] = nil
 	end
 end
 
 function ESP:Update(dt)
 	if not self.enabled then return end
-
+	
 	local color = self.color
 	if self.rainbow then
 		self.hue = (self.hue + dt * 0.2) % 1
 		color = Color3.fromHSV(self.hue, 1, 1)
 	end
-
+	
+	self.frameCounter = (self.frameCounter + 1) % self.boxUpdateInterval
+	local updateBoxes = self.frameCounter == 0
+	
 	local cam = workspace.CurrentCamera
-
+	local localPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	localPos = localPos and localPos.Position or cam.CFrame.Position
+	
 	for plr, data in pairs(self.drawings) do
 		local char = plr.Character
 		local hum = char and char:FindFirstChild("Humanoid")
-		if char and char:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0 then
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if char and root and hum and hum.Health > 0 then
+			local distance = (root.Position - localPos).Magnitude
+			if distance > self.maxDistance then
+				for _, line in ipairs(data.skeleton) do line.Visible = false end
+				for _, l in pairs(data.box) do l.Visible = false end
+				if data.name then data.name.Visible = false end
+				continue
+			end
+			
+			-- Skeleton
 			if self.showSkeleton then
 				for i, pair in ipairs(Connections) do
 					local part0 = char:FindFirstChild(pair[1])
@@ -183,30 +209,30 @@ function ESP:Update(dt)
 					end
 				end
 			else
-				for _, line in ipairs(data.skeleton) do line.Visible = false end
+				for _, line in ipairs(data.skeleton) do
+					line.Visible = false
+				end
 			end
-
-			if self.showBox then
+			
+			-- Bounding Box (Optimized)
+			if self.showBox and updateBoxes then
+				local size = Vector3.new(5, 7, 2)
+				local cf = root.CFrame
+				local halfSize = size / 2
 				local points = {}
-				for _, part in ipairs(char:GetChildren()) do
-					if part:IsA("BasePart") then
-						local cf = part.CFrame
-						local halfSize = part.Size / 2
-						for x = -1, 1, 2 do
-							for y = -1, 1, 2 do
-								for z = -1, 1, 2 do
-									local corner = cf * Vector3.new(x * halfSize.X, y * halfSize.Y, z * halfSize.Z)
-									local screen, vis = cam:WorldToViewportPoint(corner)
-									if vis and screen.Z > 0 then
-										table.insert(points, Vector2.new(screen.X, screen.Y))
-									end
-								end
+				for x = -1, 1, 2 do
+					for y = -1, 1, 2 do
+						for z = -1, 1, 2 do
+							local corner = cf * Vector3.new(x * halfSize.X, y * halfSize.Y, z * halfSize.Z)
+							local screen, vis = cam:WorldToViewportPoint(corner)
+							if vis and screen.Z > 0 then
+								table.insert(points, Vector2.new(screen.X, screen.Y))
 							end
 						end
 					end
 				end
-
-				if #points > 0 then
+				
+				if #points >= 4 then
 					local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
 					for _, p in ipairs(points) do
 						minX = math.min(minX, p.X)
@@ -214,7 +240,7 @@ function ESP:Update(dt)
 						minY = math.min(minY, p.Y)
 						maxY = math.max(maxY, p.Y)
 					end
-
+					
 					local bb = data.box
 					bb.Top.From = Vector2.new(minX, minY)
 					bb.Top.To = Vector2.new(maxX, minY)
@@ -224,18 +250,39 @@ function ESP:Update(dt)
 					bb.Left.To = Vector2.new(minX, maxY)
 					bb.Right.From = Vector2.new(maxX, minY)
 					bb.Right.To = Vector2.new(maxX, maxY)
-
+					
 					for _, l in pairs(bb) do
 						l.Color = color
 						l.Visible = true
 					end
+					
+					data.lastBoxUpdate = {minX = minX, maxX = maxX, minY = minY, maxY = maxY}
 				else
-					for _, l in pairs(data.box) do l.Visible = false end
+					for _, l in pairs(data.box) do
+						l.Visible = false
+					end
+				end
+			elseif self.showBox and data.lastBoxUpdate then
+				local bb = data.box
+				bb.Top.From = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.minY)
+				bb.Top.To = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.minY)
+				bb.Bottom.From = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.maxY)
+				bb.Bottom.To = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.maxY)
+				bb.Left.From = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.minY)
+				bb.Left.To = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.maxY)
+				bb.Right.From = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.minY)
+				bb.Right.To = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.maxY)
+				for _, l in pairs(bb) do
+					l.Color = color
+					l.Visible = true
 				end
 			else
-				for _, l in pairs(data.box) do l.Visible = false end
+				for _, l in pairs(data.box) do
+					l.Visible = false
+				end
 			end
-
+			
+			-- Name
 			if self.showName and data.name then
 				data.name.TextColor3 = color
 				data.name.Visible = true
@@ -273,18 +320,27 @@ function ESP:ToggleRainbow()
 	end
 end
 
+function ESP:SetMaxDistance(distance)
+	self.maxDistance = math.max(0, distance)
+end
+
 function ESP:IncludeSkeleton() self.showSkeleton = true end
 function ESP:ExcludeSkeleton() self.showSkeleton = false end
 function ESP:IncludeBox() self.showBox = true end
 function ESP:ExcludeBox() self.showBox = false end
 function ESP:IncludeNames() self.showName = true end
 function ESP:ExcludeNames() self.showName = false end
+function ESP:SetBoxUpdateInterval(interval)
+	self.boxUpdateInterval = math.max(1, interval)
+end
 
 function ESP:Destroy()
 	if self.renderConn then self.renderConn:Disconnect() end
 	if self.playerAddedConn then self.playerAddedConn:Disconnect() end
 	if self.playerRemovingConn then self.playerRemovingConn:Disconnect() end
-	for plr in pairs(self.drawings) do self:RemovePlayer(plr) end
+	for plr in pairs(self.drawings) do
+		self:RemovePlayer(plr)
+	end
 end
 
 return ESP
