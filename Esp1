@@ -24,44 +24,43 @@ local ESP = {}
 ESP.__index = ESP
 
 local function attachNameTag(self, plr, data)
-	if data.bb then
-		data.bb:Destroy()
-		data.bb = nil
+	if data.name then
+		data.name:Destroy()
 		data.name = nil
 	end
+	
 	local char = plr.Character
 	if not char then return end
 	local head = char:FindFirstChild("Head")
 	if not head then return end
-	local bb = Instance.new("BillboardGui")
-	bb.Name = "ESPNametag"
-	bb.Adornee = head
-	bb.Parent = head
-	bb.AlwaysOnTop = true
-	bb.LightInfluence = 0
-	bb.Size = UDim2.fromOffset(200, 40)
-	bb.ExtentsOffsetWorldSpace = Vector3.new(0, head.Size.Y / 2 + 2.5, 0) -- Higher above head
+	
+	-- Create a ScreenGui instead of BillboardGui
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "ESPScreenGui"
+	screenGui.Parent = game.CoreGui
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	
 	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
+	label.Size = UDim2.fromOffset(200, 40)
 	label.BackgroundTransparency = 1
 	label.Text = plr.Name
 	label.FontFace = Font.new("rbxassetid://12187365977")
-	label.TextScaled = true
+	label.TextScaled = false
+	label.TextSize = 20
 	label.TextXAlignment = Enum.TextXAlignment.Center
 	label.TextYAlignment = Enum.TextYAlignment.Center
 	label.Visible = false
-	label.Parent = bb
+	label.Parent = screenGui
+	
 	local stroke = Instance.new("UIStroke")
 	stroke.Thickness = 5
 	stroke.Color = Color3.new(0, 0, 0)
 	stroke.Transparency = 0
 	stroke.Parent = label
-	local textConstraint = Instance.new("UITextSizeConstraint")
-	textConstraint.MinTextSize = 24
-	textConstraint.MaxTextSize = 36
-	textConstraint.Parent = label
-	data.bb = bb
+	
 	data.name = label
+	data.screenGui = screenGui
 end
 
 function ESP.new(config)
@@ -109,7 +108,7 @@ function ESP:AddPlayer(plr)
 		skeleton = {},
 		box = {},
 		name = nil,
-		bb = nil,
+		screenGui = nil,
 		charAddedConn = nil,
 		lastBoxUpdate = nil,
 	}
@@ -147,8 +146,8 @@ function ESP:RemovePlayer(plr)
 		for _, line in pairs(data.box) do
 			line:Remove()
 		end
-		if data.bb then
-			data.bb:Destroy()
+		if data.screenGui then
+			data.screenGui:Destroy()
 		end
 		if data.charAddedConn then
 			data.charAddedConn:Disconnect()
@@ -279,9 +278,21 @@ function ESP:Update(dt)
 				end
 			end
 			
+			-- Update name tag position manually
 			if self.showName and data.name then
-				data.name.TextColor3 = color
-				data.name.Visible = true
+				local head = char:FindFirstChild("Head")
+				if head then
+					local headPos, onScreen = cam:WorldToViewportPoint(head.Position + Vector3.new(0, head.Size.Y + 0.5, 0))
+					if onScreen and headPos.Z > 0 then
+						data.name.Position = UDim2.new(0, headPos.X - data.name.AbsoluteSize.X / 2, 0, headPos.Y)
+						data.name.TextColor3 = color
+						data.name.Visible = true
+					else
+						data.name.Visible = false
+					end
+				else
+					data.name.Visible = false
+				end
 			else
 				if data.name then data.name.Visible = false end
 			end
