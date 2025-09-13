@@ -246,7 +246,7 @@ function ESP:Update(dt)
 					local pos, vis = cam:WorldToViewportPoint(offsetPos)
 					if vis and pos.Z > 0 then
 						-- Center the label
-						data.name.Position = UDim2.new(0, pos.X - 100, 0, pos.Y - 10)  -- Offset half size (200/2=100, 20/2=10)
+						data.name.Position = UDim2.fromOffset(pos.X - 100, pos.Y - 10)
 						data.name.TextColor3 = color  -- Use ESP color for text
 						data.name.Visible = true
 					else
