@@ -1,0 +1,509 @@
+-- ESP Library Module
+local ESPLibrary = {}
+ESPLibrary.__index = ESPLibrary
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- Create new ESP instance
+function ESPLibrary.new(config)
+    local self = setmetatable({}, ESPLibrary)
+    
+    -- Default config
+    self.config = {
+        enabled = false,
+        rainbow = false,
+        color = Color3.new(0, 1, 0),
+        skeleton = true,
+        box = true,
+        names = true,
+        nameFont = Font.new("rbxassetid://12187365977", Enum.FontWeight.Bold),
+        nameSize = 14,
+        lineThickness = 2,
+        teamCheck = false,
+        distanceLimit = 1000,
+        updateRate = 1/30, -- 30 FPS update rate
+    }
+    
+    -- Apply user config
+    if config then
+        for k, v in pairs(config) do
+            self.config[k] = v
+        end
+    end
+    
+    -- Internal state
+    self.drawings = {} -- [player] = {skeleton = {}, box = {}, nameLabel}
+    self.connections = {}
+    self.lastUpdate = 0
+    self.hue = 0
+    
+    -- Skeleton bone connections
+    self.skeletonConnections = {
+        {"Head", "UpperTorso"},
+        {"UpperTorso", "LowerTorso"},
+        {"UpperTorso", "LeftUpperArm"},
+        {"UpperTorso", "RightUpperArm"},
+        {"LeftUpperArm", "LeftLowerArm"},
+        {"RightUpperArm", "RightLowerArm"},
+        {"LeftLowerArm", "LeftHand"},
+        {"RightLowerArm", "RightHand"},
+        {"LowerTorso", "LeftUpperLeg"},
+        {"LowerTorso", "RightUpperLeg"},
+        {"LeftUpperLeg", "LeftLowerLeg"},
+        {"RightUpperLeg", "RightLowerLeg"},
+        {"LeftLowerLeg", "LeftFoot"},
+        {"RightLowerLeg", "RightFoot"},
+    }
+    
+    -- Initialize
+    self:setupConnections()
+    
+    return self
+end
+
+-- Setup event connections
+function ESPLibrary:setupConnections()
+    -- Player cleanup
+    self.connections.playerRemoving = Players.PlayerRemoving:Connect(function(player)
+        self:cleanupPlayer(player)
+    end)
+    
+    -- Main render loop with throttling
+    self.connections.renderStepped = RunService.RenderStepped:Connect(function()
+        local now = tick()
+        if now - self.lastUpdate < self.config.updateRate then
+            return
+        end
+        self.lastUpdate = now
+        
+        if self.config.enabled then
+            self:update()
+        end
+    end)
+end
+
+-- Cleanup specific player's drawings
+function ESPLibrary:cleanupPlayer(player)
+    local data = self.drawings[player]
+    if data then
+        -- Clean skeleton
+        if data.skeleton then
+            for _, line in pairs(data.skeleton) do
+                if line then
+                    line:Remove()
+                end
+            end
+        end
+        
+        -- Clean box
+        if data.box then
+            for _, line in pairs(data.box) do
+                if line then
+                    line:Remove()
+                end
+            end
+        end
+        
+        -- Clean name label
+        if data.nameLabel then
+            data.nameLabel:Remove()
+        end
+        if data.nameStroke then
+            data.nameStroke:Remove()
+        end
+        
+        self.drawings[player] = nil
+    end
+end
+
+-- Get or create drawings for player
+function ESPLibrary:getOrCreateDrawings(player)
+    if not self.drawings[player] then
+        self.drawings[player] = {
+            skeleton = {},
+            box = {},
+            nameLabel = nil,
+            nameStroke = nil
+        }
+    end
+    return self.drawings[player]
+end
+
+-- Update rainbow color
+function ESPLibrary:updateRainbow(deltaTime)
+    if self.config.rainbow then
+        self.hue = (self.hue + deltaTime * 0.2) % 1
+        self.config.color = Color3.fromHSV(self.hue, 1, 1)
+    end
+end
+
+-- Check if player should be rendered
+function ESPLibrary:shouldRenderPlayer(player)
+    if player == LocalPlayer then
+        return false
+    end
+    
+    if self.config.teamCheck and player.Team == LocalPlayer.Team then
+        return false
+    end
+    
+    local char = player.Character
+    if not char then
+        return false
+    end
+    
+    local humanoidRootPart = char:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then
+        return false
+    end
+    
+    -- Distance check
+    if self.config.distanceLimit then
+        local distance = (humanoidRootPart.Position - Camera.CFrame.Position).Magnitude
+        if distance > self.config.distanceLimit then
+            return false
+        end
+    end
+    
+    return true
+end
+
+-- Update skeleton ESP
+function ESPLibrary:updateSkeleton(player, char, data)
+    if not self.config.skeleton then
+        for _, line in pairs(data.skeleton) do
+            if line then
+                line.Visible = false
+            end
+        end
+        return
+    end
+    
+    for i, pair in ipairs(self.skeletonConnections) do
+        local part0 = char:FindFirstChild(pair[1])
+        local part1 = char:FindFirstChild(pair[2])
+        
+        if part0 and part1 then
+            local pos0, onscreen0 = Camera:WorldToViewportPoint(part0.Position)
+            local pos1, onscreen1 = Camera:WorldToViewportPoint(part1.Position)
+            
+            if not data.skeleton[i] then
+                local line = Drawing.new("Line")
+                line.Thickness = self.config.lineThickness
+                data.skeleton[i] = line
+            end
+            
+            local line = data.skeleton[i]
+            if onscreen0 and onscreen1 then
+                line.From = Vector2.new(pos0.X, pos0.Y)
+                line.To = Vector2.new(pos1.X, pos1.Y)
+                line.Color = self.config.color
+                line.Visible = true
+            else
+                line.Visible = false
+            end
+        elseif data.skeleton[i] then
+            data.skeleton[i].Visible = false
+        end
+    end
+end
+
+-- Update bounding box ESP
+function ESPLibrary:updateBoundingBox(player, char, data)
+    if not self.config.box then
+        for _, line in pairs(data.box) do
+            if line then
+                line.Visible = false
+            end
+        end
+        return
+    end
+    
+    -- Calculate bounding box more efficiently
+    local humanoidRootPart = char:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then
+        return
+    end
+    
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        return
+    end
+    
+    -- Use character's HumanoidRootPart for more stable box
+    local rootPos = humanoidRootPart.Position
+    local headPos = char:FindFirstChild("Head") and char.Head.Position or rootPos + Vector3.new(0, 2, 0)
+    
+    -- Calculate corners based on character height
+    local height = (headPos - rootPos).Magnitude + 1
+    local width = 2
+    local depth = 1
+    
+    local corners = {}
+    for x = -1, 1, 2 do
+        for y = -1, 1, 2 do
+            local corner = rootPos + Vector3.new(width * x, height * y - height/2, depth)
+            local screenPos, onScreen = Camera:WorldToViewportPoint(corner)
+            if onScreen then
+                table.insert(corners, Vector2.new(screenPos.X, screenPos.Y))
+            end
+        end
+    end
+    
+    if #corners >= 4 then
+        local minX, minY = math.huge, math.huge
+        local maxX, maxY = -math.huge, -math.huge
+        
+        for _, corner in ipairs(corners) do
+            minX = math.min(minX, corner.X)
+            minY = math.min(minY, corner.Y)
+            maxX = math.max(maxX, corner.X)
+            maxY = math.max(maxY, corner.Y)
+        end
+        
+        -- Create box lines if they don't exist
+        if not data.box.Top then
+            data.box.Top = Drawing.new("Line")
+            data.box.Bottom = Drawing.new("Line")
+            data.box.Left = Drawing.new("Line")
+            data.box.Right = Drawing.new("Line")
+            
+            for _, line in pairs(data.box) do
+                line.Thickness = self.config.lineThickness
+            end
+        end
+        
+        -- Update box positions
+        data.box.Top.From = Vector2.new(minX, minY)
+        data.box.Top.To = Vector2.new(maxX, minY)
+        data.box.Bottom.From = Vector2.new(minX, maxY)
+        data.box.Bottom.To = Vector2.new(maxX, maxY)
+        data.box.Left.From = Vector2.new(minX, minY)
+        data.box.Left.To = Vector2.new(minX, maxY)
+        data.box.Right.From = Vector2.new(maxX, minY)
+        data.box.Right.To = Vector2.new(maxX, maxY)
+        
+        for _, line in pairs(data.box) do
+            line.Color = self.config.color
+            line.Visible = true
+        end
+    else
+        for _, line in pairs(data.box) do
+            if line then
+                line.Visible = false
+            end
+        end
+    end
+end
+
+-- Update name label ESP
+function ESPLibrary:updateNameLabel(player, char, data)
+    if not self.config.names then
+        if data.nameLabel then
+            data.nameLabel.Visible = false
+        end
+        if data.nameStroke then
+            data.nameStroke.Visible = false
+        end
+        return
+    end
+    
+    local head = char:FindFirstChild("Head")
+    if not head then
+        if data.nameLabel then
+            data.nameLabel.Visible = false
+        end
+        if data.nameStroke then
+            data.nameStroke.Visible = false
+        end
+        return
+    end
+    
+    local headPos, onScreen = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 1, 0))
+    
+    if not data.nameLabel then
+        data.nameLabel = Drawing.new("Text")
+        data.nameLabel.Font = self.config.nameFont
+        data.nameLabel.Size = self.config.nameSize
+        data.nameLabel.Center = true
+        data.nameLabel.Text = player.Name
+    end
+    
+    if not data.nameStroke then
+        data.nameStroke = Drawing.new("Text")
+        data.nameStroke.Font = self.config.nameFont
+        data.nameStroke.Size = self.config.nameSize
+        data.nameStroke.Center = true
+        data.nameStroke.Text = player.Name
+        data.nameStroke.Color = Color3.new(0, 0, 0)
+    end
+    
+    if onScreen then
+        -- Update stroke (outline)
+        for xOff = -1, 1 do
+            for yOff = -1, 1 do
+                if xOff ~= 0 or yOff ~= 0 then
+                    data.nameStroke.Position = Vector2.new(headPos.X + xOff, headPos.Y + yOff)
+                    data.nameStroke.Visible = true
+                end
+            end
+        end
+        
+        -- Update main text
+        data.nameLabel.Position = Vector2.new(headPos.X, headPos.Y)
+        data.nameLabel.Color = self.config.color
+        data.nameLabel.Visible = true
+    else
+        data.nameLabel.Visible = false
+        data.nameStroke.Visible = false
+    end
+end
+
+-- Main update function
+function ESPLibrary:update()
+    self:updateRainbow(self.config.updateRate)
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if self:shouldRenderPlayer(player) then
+            local char = player.Character
+            if char then
+                local data = self:getOrCreateDrawings(player)
+                self:updateSkeleton(player, char, data)
+                self:updateBoundingBox(player, char, data)
+                self:updateNameLabel(player, char, data)
+            end
+        else
+            -- Hide drawings if player shouldn't be rendered
+            local data = self.drawings[player]
+            if data then
+                for _, line in pairs(data.skeleton or {}) do
+                    if line then line.Visible = false end
+                end
+                for _, line in pairs(data.box or {}) do
+                    if line then line.Visible = false end
+                end
+                if data.nameLabel then
+                    data.nameLabel.Visible = false
+                end
+                if data.nameStroke then
+                    data.nameStroke.Visible = false
+                end
+            end
+        end
+    end
+end
+
+-- Toggle ESP on/off
+function ESPLibrary:toggle(state)
+    if state ~= nil then
+        self.config.enabled = state
+    else
+        self.config.enabled = not self.config.enabled
+    end
+    
+    if not self.config.enabled then
+        self:hideAll()
+    end
+    
+    return self.config.enabled
+end
+
+-- Hide all drawings
+function ESPLibrary:hideAll()
+    for player, data in pairs(self.drawings) do
+        for _, line in pairs(data.skeleton or {}) do
+            if line then line.Visible = false end
+        end
+        for _, line in pairs(data.box or {}) do
+            if line then line.Visible = false end
+        end
+        if data.nameLabel then
+            data.nameLabel.Visible = false
+        end
+        if data.nameStroke then
+            data.nameStroke.Visible = false
+        end
+    end
+end
+
+-- Set color
+function ESPLibrary:setColor(color)
+    self.config.color = color
+    self.config.rainbow = false
+end
+
+-- Toggle rainbow
+function ESPLibrary:toggleRainbow(state)
+    if state ~= nil then
+        self.config.rainbow = state
+    else
+        self.config.rainbow = not self.config.rainbow
+    end
+    
+    if not self.config.rainbow then
+        self.config.color = Color3.new(0, 1, 0) -- Default green
+    end
+    
+    return self.config.rainbow
+end
+
+-- Toggle skeleton
+function ESPLibrary:toggleSkeleton(state)
+    if state ~= nil then
+        self.config.skeleton = state
+    else
+        self.config.skeleton = not self.config.skeleton
+    end
+    return self.config.skeleton
+end
+
+-- Toggle box
+function ESPLibrary:toggleBox(state)
+    if state ~= nil then
+        self.config.box = state
+    else
+        self.config.box = not self.config.box
+    end
+    return self.config.box
+end
+
+-- Toggle names
+function ESPLibrary:toggleNames(state)
+    if state ~= nil then
+        self.config.names = state
+    else
+        self.config.names = not self.config.names
+    end
+    return self.config.names
+end
+
+-- Update config
+function ESPLibrary:updateConfig(newConfig)
+    for k, v in pairs(newConfig) do
+        self.config[k] = v
+    end
+end
+
+-- Destroy ESP and cleanup
+function ESPLibrary:destroy()
+    -- Cleanup all drawings
+    for player, _ in pairs(self.drawings) do
+        self:cleanupPlayer(player)
+    end
+    
+    -- Disconnect all connections
+    for _, connection in pairs(self.connections) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    
+    self.drawings = {}
+    self.connections = {}
+end
+
+return ESPLibrary
