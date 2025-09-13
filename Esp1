@@ -1,374 +1,337 @@
--- LocalScript in StarterPlayerScripts
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
 
--- Require the ESP Module
-local ESPModule = require(game:GetService("ReplicatedStorage"):WaitForChild("ESP"))
+local Connections = {
+	{"Head", "UpperTorso"},
+	{"UpperTorso", "LowerTorso"},
+	{"UpperTorso", "LeftUpperArm"},
+	{"UpperTorso", "RightUpperArm"},
+	{"LeftUpperArm", "LeftLowerArm"},
+	{"RightUpperArm", "RightLowerArm"},
+	{"LeftLowerArm", "LeftHand"},
+	{"RightLowerArm", "RightHand"},
+	{"LowerTorso", "LeftUpperLeg"},
+	{"LowerTorso", "RightUpperLeg"},
+	{"LeftUpperLeg", "LeftLowerLeg"},
+	{"RightUpperLeg", "RightLowerLeg"},
+	{"LeftLowerLeg", "LeftFoot"},
+	{"RightLowerLeg", "RightFoot"},
+}
 
--- Create ESP instance
-local myESP = ESPModule.new({
-	enabled = false,
-	rainbow = false,
-	color = Color3.new(0, 1, 0),
-	showSkeleton = true,
-	showBox = false,
-	showName = true,
-	maxDistance = 50,
-})
+local ESP = {}
+ESP.__index = ESP
 
--- Create ScreenGui
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ESPControlGui"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-
--- Create main frame
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 220, 0, 370)
-Frame.Position = UDim2.new(0, 10, 0, 10)
-Frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-Frame.BorderSizePixel = 0
-Frame.Parent = ScreenGui
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = Frame
-
--- Title
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 30)
-Title.Position = UDim2.new(0, 0, 0, 5)
-Title.BackgroundTransparency = 1
-Title.Text = "ESP Controls"
-Title.TextColor3 = Color3.new(1, 1, 1)
-Title.TextSize = 16
-Title.Font = Enum.Font.SourceSansBold
-Title.Parent = Frame
-
--- Toggle ESP button
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0, 180, 0, 30)
-ToggleButton.Position = UDim2.new(0, 20, 0, 40)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-ToggleButton.Text = "Toggle ESP: OFF"
-ToggleButton.TextColor3 = Color3.new(1, 1, 1)
-ToggleButton.TextSize = 14
-ToggleButton.Font = Enum.Font.SourceSans
-ToggleButton.Parent = Frame
-local ToggleCorner = Instance.new("UICorner")
-ToggleCorner.CornerRadius = UDim.new(0, 4)
-ToggleCorner.Parent = ToggleButton
-
--- Toggle Rainbow button
-local RainbowButton = Instance.new("TextButton")
-RainbowButton.Size = UDim2.new(0, 180, 0, 30)
-RainbowButton.Position = UDim2.new(0, 20, 0, 80)
-RainbowButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-RainbowButton.Text = "Rainbow: OFF"
-RainbowButton.TextColor3 = Color3.new(1, 1, 1)
-RainbowButton.TextSize = 14
-RainbowButton.Font = Enum.Font.SourceSans
-RainbowButton.Parent = Frame
-local RainbowCorner = Instance.new("UICorner")
-RainbowCorner.CornerRadius = UDim.new(0, 4)
-RainbowCorner.Parent = RainbowButton
-
--- Toggle Skeleton button
-local SkeletonButton = Instance.new("TextButton")
-SkeletonButton.Size = UDim2.new(0, 180, 0, 30)
-SkeletonButton.Position = UDim2.new(0, 20, 0, 120)
-SkeletonButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-SkeletonButton.Text = "Skeleton: ON"
-SkeletonButton.TextColor3 = Color3.new(1, 1, 1)
-SkeletonButton.TextSize = 14
-SkeletonButton.Font = Enum.Font.SourceSans
-SkeletonButton.Parent = Frame
-local SkeletonCorner = Instance.new("UICorner")
-SkeletonCorner.CornerRadius = UDim.new(0, 4)
-SkeletonCorner.Parent = SkeletonButton
-
--- Toggle Box button
-local BoxButton = Instance.new("TextButton")
-BoxButton.Size = UDim2.new(0, 180, 0, 30)
-BoxButton.Position = UDim2.new(0, 20, 0, 160)
-BoxButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-BoxButton.Text = "Box: OFF"
-BoxButton.TextColor3 = Color3.new(1, 1, 1)
-BoxButton.TextSize = 14
-BoxButton.Font = Enum.Font.SourceSans
-BoxButton.Parent = Frame
-local BoxCorner = Instance.new("UICorner")
-BoxCorner.CornerRadius = UDim.new(0, 4)
-BoxCorner.Parent = BoxButton
-
--- Toggle Names button
-local NamesButton = Instance.new("TextButton")
-NamesButton.Size = UDim2.new(0, 180, 0, 30)
-NamesButton.Position = UDim2.new(0, 20, 0, 200)
-NamesButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-NamesButton.Text = "Names: ON"
-NamesButton.TextColor3 = Color3.new(1, 1, 1)
-NamesButton.TextSize = 14
-NamesButton.Font = Enum.Font.SourceSans
-NamesButton.Parent = Frame
-local NamesCorner = Instance.new("UICorner")
-NamesCorner.CornerRadius = UDim.new(0, 4)
-NamesCorner.Parent = NamesButton
-
--- Max Distance Slider
-local function createDistanceSlider()
-	local SliderFrame = Instance.new("Frame")
-	SliderFrame.Size = UDim2.new(0, 180, 0, 20)
-	SliderFrame.Position = UDim2.new(0, 20, 0, 240)
-	SliderFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	SliderFrame.Parent = Frame
-	local SliderCorner = Instance.new("UICorner")
-	SliderCorner.CornerRadius = UDim.new(0, 4)
-	SliderCorner.Parent = SliderFrame
-	
-	local SliderLabel = Instance.new("TextLabel")
-	SliderLabel.Size = UDim2.new(0, 50, 1, 0)
-	SliderLabel.BackgroundTransparency = 1
-	SliderLabel.Text = "Max Dist:"
-	SliderLabel.TextColor3 = Color3.new(1, 1, 1)
-	SliderLabel.TextSize = 12
-	SliderLabel.Font = Enum.Font.SourceSans
-	SliderLabel.Parent = SliderFrame
-	
-	local Slider = Instance.new("TextButton")
-	Slider.Size = UDim2.new(0.4, 0, 1, 0) -- Default ~50 studs
-	Slider.Position = UDim2.new(0, 50, 0, 0)
-	Slider.SizeConstraint = Enum.SizeConstraint.RelativeXX
-	Slider.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-	Slider.Text = ""
-	Slider.Parent = SliderFrame
-	local SliderInnerCorner = Instance.new("UICorner")
-	SliderInnerCorner.CornerRadius = UDim.new(0, 4)
-	SliderInnerCorner.Parent = Slider
-	
-	local dragging = false
-	Slider.MouseButton1Down:Connect(function()
-		dragging = true
-	end)
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = false
-		end
-	end)
-	Slider.MouseMoved:Connect(function()
-		if dragging then
-			local mouse = UserInputService:GetMouseLocation()
-			local absPos = SliderFrame.AbsolutePosition.X + 50
-			local absSize = SliderFrame.AbsoluteSize.X - 50
-			local rel = math.clamp((mouse.X - absPos) / absSize, 0, 1)
-			Slider.Size = UDim2.new(rel, 0, 1, 0)
-			local distance = math.floor(rel * 90 + 10)
-			myESP:SetMaxDistance(distance)
-		end
-	end)
-	
-	return Slider
-end
-local DistanceSlider = createDistanceSlider()
-
--- Box Update Interval Slider
-local function createIntervalSlider()
-	local SliderFrame = Instance.new("Frame")
-	SliderFrame.Size = UDim2.new(0, 180, 0, 20)
-	SliderFrame.Position = UDim2.new(0, 20, 0, 270)
-	SliderFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	SliderFrame.Parent = Frame
-	local SliderCorner = Instance.new("UICorner")
-	SliderCorner.CornerRadius = UDim.new(0, 4)
-	SliderCorner.Parent = SliderFrame
-	
-	local SliderLabel = Instance.new("TextLabel")
-	SliderLabel.Size = UDim2.new(0, 50, 1, 0)
-	SliderLabel.BackgroundTransparency = 1
-	SliderLabel.Text = "Box Freq:"
-	SliderLabel.TextColor3 = Color3.new(1, 1, 1)
-	SliderLabel.TextSize = 12
-	SliderLabel.Font = Enum.Font.SourceSans
-	SliderLabel.Parent = SliderFrame
-	
-	local Slider = Instance.new("TextButton")
-	Slider.Size = UDim2.new(0.6, 0, 1, 0)
-	Slider.Position = UDim2.new(0, 50, 0, 0)
-	Slider.SizeConstraint = Enum.SizeConstraint.RelativeXX
-	Slider.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-	Slider.Text = ""
-	Slider.Parent = SliderFrame
-	local SliderInnerCorner = Instance.new("UICorner")
-	SliderInnerCorner.CornerRadius = UDim.new(0, 4)
-	SliderInnerCorner.Parent = Slider
-	
-	local dragging = false
-	Slider.MouseButton1Down:Connect(function()
-		dragging = true
-	end)
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = false
-		end
-	end)
-	Slider.MouseMoved:Connect(function()
-		if dragging then
-			local mouse = UserInputService:GetMouseLocation()
-			local absPos = SliderFrame.AbsolutePosition.X + 50
-			local absSize = SliderFrame.AbsoluteSize.X - 50
-			local rel = math.clamp((mouse.X - absPos) / absSize, 0, 1)
-			Slider.Size = UDim2.new(rel, 0, 1, 0)
-			local interval = math.floor(rel * 9 + 1)
-			myESP:SetBoxUpdateInterval(interval)
-		end
-	end)
-	
-	return Slider
-end
-local IntervalSlider = createIntervalSlider()
-
--- Color sliders
-local function createSlider(posY, labelText, channel)
-	local SliderFrame = Instance.new("Frame")
-	SliderFrame.Size = UDim2.new(0, 180, 0, 20)
-	SliderFrame.Position = UDim2.new(0, 20, 0, posY)
-	SliderFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	SliderFrame.Parent = Frame
-	local SliderCorner = Instance.new("UICorner")
-	SliderCorner.CornerRadius = UDim.new(0, 4)
-	SliderCorner.Parent = SliderFrame
-	
-	local SliderLabel = Instance.new("TextLabel")
-	SliderLabel.Size = UDim2.new(0, 50, 1, 0)
-	SliderLabel.BackgroundTransparency = 1
-	SliderLabel.Text = labelText
-	SliderLabel.TextColor3 = Color3.new(1, 1, 1)
-	SliderLabel.TextSize = 12
-	SliderLabel.Font = Enum.Font.SourceSans
-	SliderLabel.Parent = SliderFrame
-	
-	local Slider = Instance.new("TextButton")
-	Slider.Size = UDim2.new(0, 0, 1, 0)
-	Slider.Position = UDim2.new(0, 50, 0, 0)
-	Slider.SizeConstraint = Enum.SizeConstraint.RelativeXX
-	Slider.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-	Slider.Text = ""
-	Slider.Parent = SliderFrame
-	local SliderInnerCorner = Instance.new("UICorner")
-	SliderInnerCorner.CornerRadius = UDim.new(0, 4)
-	SliderInnerCorner.Parent = Slider
-	
-	local dragging = false
-	Slider.MouseButton1Down:Connect(function()
-		dragging = true
-	end)
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = false
-		end
-	end)
-	Slider.MouseMoved:Connect(function()
-		if dragging then
-			local mouse = UserInputService:GetMouseLocation()
-			local absPos = SliderFrame.AbsolutePosition.X + 50
-			local absSize = SliderFrame.AbsoluteSize.X - 50
-			local rel = math.clamp((mouse.X - absPos) / absSize, 0, 1)
-			Slider.Size = UDim2.new(rel, 0, 1, 0)
-			local currentColor = myESP.color
-			local r = (channel == "R") and rel or currentColor.R
-			local g = (channel == "G") and rel or currentColor.G
-			local b = (channel == "B") and rel or currentColor.B
-			myESP:SetColor(Color3.new(r, g, b))
-		end
-	end)
-	
-	return Slider
-end
-
-local SliderR = createSlider(300, "R:", "R")
-local SliderG = createSlider(330, "G:", "G")
-local SliderB = createSlider(360, "B:", "B")
-
--- Close button
-local CloseButton = Instance.new("TextButton")
-CloseButton.Size = UDim2.new(0, 30, 0, 30)
-CloseButton.Position = UDim2.new(1, -35, 0, 5)
-CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-CloseButton.Text = "X"
-CloseButton.TextColor3 = Color3.new(1, 1, 1)
-CloseButton.TextSize = 14
-CloseButton.Font = Enum.Font.SourceSansBold
-CloseButton.Parent = Frame
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(0, 4)
-CloseCorner.Parent = CloseButton
-
--- Button connections
-ToggleButton.MouseButton1Click:Connect(function()
-	myESP:Toggle()
-	ToggleButton.Text = "Toggle ESP: " .. (myESP.enabled and "ON" or "OFF")
-end)
-
-RainbowButton.MouseButton1Click:Connect(function()
-	myESP:ToggleRainbow()
-	RainbowButton.Text = "Rainbow: " .. (myESP.rainbow and "ON" or "OFF")
-end)
-
-SkeletonButton.MouseButton1Click:Connect(function()
-	if myESP.showSkeleton then
-		myESP:ExcludeSkeleton()
-		SkeletonButton.Text = "Skeleton: OFF"
-	else
-		myESP:IncludeSkeleton()
-		SkeletonButton.Text = "Skeleton: ON"
+local function attachNameTag(self, plr, data)
+	if data.bb then
+		data.bb:Destroy()
+		data.bb = nil
+		data.name = nil
 	end
-end)
-
-BoxButton.MouseButton1Click:Connect(function()
-	if myESP.showBox then
-		myESP:ExcludeBox()
-		BoxButton.Text = "Box: OFF"
-	else
-		myESP:IncludeBox()
-		BoxButton.Text = "Box: ON"
-	end
-end)
-
-NamesButton.MouseButton1Click:Connect(function()
-	if myESP.showName then
-		myESP:ExcludeNames()
-		NamesButton.Text = "Names: OFF"
-	else
-		myESP:IncludeNames()
-		NamesButton.Text = "Names: ON"
-	end
-end)
-
-CloseButton.MouseButton1Click:Connect(function()
-	myESP:Destroy()
-	ScreenGui:Destroy()
-end)
-
--- Initialize slider positions
-local function updateSliders()
-	local color = myESP.color
-	SliderR.Size = UDim2.new(color.R, 0, 1, 0)
-	SliderG.Size = UDim2.new(color.G, 0, 1, 0)
-	SliderB.Size = UDim2.new(color.B, 0, 1, 0)
+	local char = plr.Character
+	if not char then return end
+	local head = char:FindFirstChild("Head")
+	if not head then return end
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "ESPNametag"
+	bb.Adornee = head
+	bb.Parent = head
+	bb.AlwaysOnTop = true
+	bb.LightInfluence = 0
+	bb.Size = UDim2.fromScale(2, 0.2) -- Scale-based sizing
+	bb.ExtentsOffsetWorldSpace = Vector3.new(0, head.Size.Y / 2 + 2.5, 0) -- 2.5 studs above head
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1) -- Scale-based sizing
+	label.BackgroundTransparency = 1
+	label.Text = plr.Name
+	label.FontFace = Font.new("rbxassetid://12187365977")
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.Visible = false
+	label.Parent = bb
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 5
+	stroke.Color = Color3.new(0, 0, 0)
+	stroke.Transparency = 0
+	stroke.Parent = label
+	data.bb = bb
+	data.name = label
 end
-updateSliders()
 
--- Update sliders when rainbow is toggled
-local function onRainbowToggled()
-	if myESP.rainbow then
-		SliderR.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-		SliderG.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-		SliderB.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-	else
-		SliderR.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-		SliderG.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-		SliderB.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-		updateSliders()
+function ESP.new(config)
+	config = config or {}
+	local self = setmetatable({}, ESP)
+	
+	self.enabled = config.enabled or false
+	self.rainbow = config.rainbow or false
+	self.color = config.color or Color3.new(0, 1, 0)
+	self.defaultColor = self.color
+	self.showSkeleton = config.showSkeleton ~= false
+	self.showBox = config.showBox ~= false
+	self.showName = config.showName ~= false
+	self.maxDistance = config.maxDistance or 100
+	self.hue = 0
+	self.drawings = {}
+	self.frameCounter = 0
+	self.boxUpdateInterval = 3
+	
+	-- Connections
+	self.playerAddedConn = Players.PlayerAdded:Connect(function(plr)
+		self:AddPlayer(plr)
+	end)
+	self.playerRemovingConn = Players.PlayerRemoving:Connect(function(plr)
+		self:RemovePlayer(plr)
+	end)
+	
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			self:AddPlayer(plr)
+		end
+	end
+	
+	self.renderConn = RunService.RenderStepped:Connect(function(dt)
+		self:Update(dt)
+	end)
+	
+	return self
+end
+
+function ESP:AddPlayer(plr)
+	if plr == LocalPlayer then return end
+	
+	local data = {
+		skeleton = {},
+		box = {},
+		name = nil,
+		bb = nil,
+		charAddedConn = nil,
+		lastBoxUpdate = nil,
+	}
+	
+	for i = 1, #Connections do
+		local line = Drawing.new("Line")
+		line.Thickness = 2
+		line.Visible = false
+		data.skeleton[i] = line
+	end
+	
+	local boxLines = {}
+	for _, dir in ipairs({"Top", "Bottom", "Left", "Right"}) do
+		local line = Drawing.new("Line")
+		line.Thickness = 2
+		line.Visible = false
+		boxLines[dir] = line
+	end
+	data.box = boxLines
+	
+	attachNameTag(self, plr, data)
+	data.charAddedConn = plr.CharacterAdded:Connect(function()
+		attachNameTag(self, plr, data)
+	end)
+	
+	self.drawings[plr] = data
+end
+
+function ESP:RemovePlayer(plr)
+	local data = self.drawings[plr]
+	if data then
+		for _, line in ipairs(data.skeleton) do
+			line:Remove()
+		end
+		for _, line in pairs(data.box) do
+			line:Remove()
+		end
+		if data.bb then
+			data.bb:Destroy()
+		end
+		if data.charAddedConn then
+			data.charAddedConn:Disconnect()
+		end
+		self.drawings[plr] = nil
 	end
 end
-RainbowButton.MouseButton1Click:Connect(onRainbowToggled)
+
+function ESP:Update(dt)
+	if not self.enabled then return end
+	
+	local color = self.color
+	if self.rainbow then
+		self.hue = (self.hue + dt * 0.2) % 1
+		color = Color3.fromHSV(self.hue, 1, 1)
+	end
+	
+	self.frameCounter = (self.frameCounter + 1) % self.boxUpdateInterval
+	local updateBoxes = self.frameCounter == 0
+	
+	local cam = workspace.CurrentCamera
+	local localPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	localPos = localPos and localPos.Position or cam.CFrame.Position
+	
+	for plr, data in pairs(self.drawings) do
+		local char = plr.Character
+		local hum = char and char:FindFirstChild("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if char and root and hum and hum.Health > 0 then
+			local distance = (root.Position - localPos).Magnitude
+			if distance > self.maxDistance then
+				for _, line in ipairs(data.skeleton) do line.Visible = false end
+				for _, l in pairs(data.box) do l.Visible = false end
+				if data.name then data.name.Visible = false end
+				continue
+			end
+			
+			if self.showSkeleton then
+				for i, pair in ipairs(Connections) do
+					local part0 = char:FindFirstChild(pair[1])
+					local part1 = char:FindFirstChild(pair[2])
+					local line = data.skeleton[i]
+					if part0 and part1 then
+						local pos0, vis0 = cam:WorldToViewportPoint(part0.Position)
+						local pos1, vis1 = cam:WorldToViewportPoint(part1.Position)
+						if vis0 and vis1 and pos0.Z > 0 and pos1.Z > 0 then
+							line.From = Vector2.new(pos0.X, pos0.Y)
+							line.To = Vector2.new(pos1.X, pos1.Y)
+							line.Color = color
+							line.Visible = true
+						else
+							line.Visible = false
+						end
+					else
+						line.Visible = false
+					end
+				end
+			else
+				for _, line in ipairs(data.skeleton) do
+					line.Visible = false
+				end
+			end
+			
+			if self.showBox and updateBoxes then
+				local size = Vector3.new(5, 7, 2)
+				local cf = root.CFrame
+				local halfSize = size / 2
+				local points = {}
+				for x = -1, 1, 2 do
+					for y = -1, 1, 2 do
+						for z = -1, 1, 2 do
+							local corner = cf * Vector3.new(x * halfSize.X, y * halfSize.Y, z * halfSize.Z)
+							local screen, vis = cam:WorldToViewportPoint(corner)
+							if vis and screen.Z > 0 then
+								table.insert(points, Vector2.new(screen.X, screen.Y))
+							end
+						end
+					end
+				end
+				
+				if #points >= 4 then
+					local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
+					for _, p in ipairs(points) do
+						minX = math.min(minX, p.X)
+						maxX = math.max(maxX, p.X)
+						minY = math.min(minY, p.Y)
+						maxY = math.max(maxY, p.Y)
+					end
+					
+					local bb = data.box
+					bb.Top.From = Vector2.new(minX, minY)
+					bb.Top.To = Vector2.new(maxX, minY)
+					bb.Bottom.From = Vector2.new(minX, maxY)
+					bb.Bottom.To = Vector2.new(maxX, maxY)
+					bb.Left.From = Vector2.new(minX, minY)
+					bb.Left.To = Vector2.new(minX, maxY)
+					bb.Right.From = Vector2.new(maxX, minY)
+					bb.Right.To = Vector2.new(maxX, maxY)
+					
+					for _, l in pairs(bb) do
+						l.Color = color
+						l.Visible = true
+					end
+					
+					data.lastBoxUpdate = {minX = minX, maxX = maxX, minY = minY, maxY = maxY}
+				else
+					for _, l in pairs(data.box) do
+						l.Visible = false
+					end
+				end
+			elseif self.showBox and data.lastBoxUpdate then
+				local bb = data.box
+				bb.Top.From = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.minY)
+				bb.Top.To = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.minY)
+				bb.Bottom.From = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.maxY)
+				bb.Bottom.To = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.maxY)
+				bb.Left.From = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.minY)
+				bb.Left.To = Vector2.new(data.lastBoxUpdate.minX, data.lastBoxUpdate.maxY)
+				bb.Right.From = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.minY)
+				bb.Right.To = Vector2.new(data.lastBoxUpdate.maxX, data.lastBoxUpdate.maxY)
+				for _, l in pairs(bb) do
+					l.Color = color
+					l.Visible = true
+				end
+			else
+				for _, l in pairs(data.box) do
+					l.Visible = false
+				end
+			end
+			
+			if self.showName and data.name then
+				data.name.TextColor3 = color
+				data.name.Visible = true
+			else
+				if data.name then data.name.Visible = false end
+			end
+		else
+			for _, line in ipairs(data.skeleton) do line.Visible = false end
+			for _, l in pairs(data.box) do l.Visible = false end
+			if data.name then data.name.Visible = false end
+		end
+	end
+end
+
+function ESP:Toggle()
+	self.enabled = not self.enabled
+	if not self.enabled then
+		for _, data in pairs(self.drawings) do
+			for _, line in ipairs(data.skeleton) do line.Visible = false end
+			for _, l in pairs(data.box) do l.Visible = false end
+			if data.name then data.name.Visible = false end
+		end
+	end
+end
+
+function ESP:SetColor(newColor)
+	self.color = newColor
+	self.defaultColor = newColor
+end
+
+function ESP:ToggleRainbow()
+	self.rainbow = not self.rainbow
+	if not self.rainbow then
+		self.color = self.defaultColor
+	end
+end
+
+function ESP:SetMaxDistance(distance)
+	self.maxDistance = math.max(0, distance)
+end
+
+function ESP:IncludeSkeleton() self.showSkeleton = true end
+function ESP:ExcludeSkeleton() self.showSkeleton = false end
+function ESP:IncludeBox() self.showBox = true end
+function ESP:ExcludeBox() self.showBox = false end
+function ESP:IncludeNames() self.showName = true end
+function ESP:ExcludeNames() self.showName = false end
+function ESP:SetBoxUpdateInterval(interval)
+	self.boxUpdateInterval = math.max(1, interval)
+end
+
+function ESP:Destroy()
+	if self.renderConn then self.renderConn:Disconnect() end
+	if self.playerAddedConn then self.playerAddedConn:Disconnect() end
+	if self.playerRemovingConn then self.playerRemovingConn:Disconnect() end
+	for plr in pairs(self.drawings) do
+		self:RemovePlayer(plr)
+	end
+end
+
+return ESP
